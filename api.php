@@ -21,7 +21,7 @@ class serviceAPI
 
 
     function __construct(){
-        $dsn = 'mysql:host=multe.ddns.net;port=8081;dbname=Multe';
+        $dsn = 'mysql:host=93.41.234.234;port=8081;dbname=Multe';
         $user = 'francy';
         $password = 'francy1!';
         
@@ -148,7 +148,7 @@ class serviceAPI
         </script>
         ';
     }
-    function enter_delete($admintoken){
+    function enter_delete($admintoken, $min = 0, $max = 4){
         if(!$this->checkToken($admintoken) || $this->getAdminLevel($admintoken) == 0){
             sendResponse(500,"Non è stato possibile autenticarti!");
             return;
@@ -160,12 +160,15 @@ class serviceAPI
         }else if($bigpplevel == 2){
             $miaQuery = "SELECT user, nome, cognome, admin from vigile where admin <> '2';";
         }
+
         $statement = $this->db_connection->query($miaQuery,PDO::FETCH_ASSOC);
         $risultati = $statement->fetchAll();
         $risultati = json_encode($risultati);
         echo '
         <form name="eheh" method="post" action="../eliminavigile.php">
             <input type="hidden" name="admincode" value='.$admintoken.'>
+            <input type="hidden" name="min" value='.$min.'>
+            <input type="hidden" name="max" value='.$max.'>
             <input type="hidden" name="vigili" value='.$risultati.'>
         </form>
         <script type="text/javascript">
@@ -173,7 +176,7 @@ class serviceAPI
         </script>
         ';
     }
-    function enter_query($admintoken){
+    function enter_query($admintoken, $min = 0, $max = 4){
         if(!$this->checkToken($admintoken) || $this->getAdminLevel($admintoken) == 0){
             sendResponse(500,"Non è stato possibile autenticarti!");
             return;
@@ -187,6 +190,8 @@ class serviceAPI
         echo '
         <form name="eheh" method="post" action="../querymulte.php">
             <input type="hidden" name="token" value='.$admintoken.'>
+            <input type="hidden" name="min" value='.$min.'>
+            <input type="hidden" name="max" value='.$max.'>
             <input type="hidden" name="multe" value='.$risultati.'>
         </form>
         <script type="text/javascript">
@@ -372,13 +377,19 @@ class serviceAPI
 
                 $miaQuery = "INSERT INTO multa VALUES($nuovoId, '$vigile', '$targa', '$luogo', $importo, '$dataora', $latitudine , $longitudine, NULL);";
                 $statement = $this->db_connection->query($miaQuery);
-                $effr = explode(",",$_POST['effrazioni']);
 
-                for($i = 0; i < sizeof($effr); $i++){
-                    $miaQuery = "INSERT INTO multa_effrazioni VALUES($nuovoId, $effr[$i]);";
-                    $statement = $this->db_connection->query($miaQuery);
+                $effr = explode(",", $_POST['effrazioni']);
+                
+                $inizio = "START TRANSACTION;";
+                for($i = 0; $i < sizeof($effr); $i++){
+                    $query = "INSERT INTO multa_effrazioni VALUES ($nuovoId, $effr[$i]);";
+                    
+                    $inizio = $inizio.$query;
                 }
-                sendResponse(200, '{"esito": "ok"}', "application/json");
+                $inizio = $inizio."COMMIT;";
+                $statement = $this->db_connection->query($inizio);
+
+                sendResponse(200, $miaQuery, "application/json");
             }else{
                 sendResponse(500, "Non è stato possibile autenticarti", "application/json");
             }
@@ -393,10 +404,75 @@ class serviceAPI
             $statement = $this->db_connection->query($miaQuery,PDO::FETCH_ASSOC);
             $risultati = $statement->fetchAll();
 
-            sendResponse(200, json_encode($risultati), "application/json");
+            sendResponse(200, '{"multe":'.json_encode($risultati).'}', "application/json");
+        }else{
+            sendResponse(500, '{"esito":"no"}', "application/json");
         }
     }
-    
+    function app_eliminaMulta($token){
+        $controllo = $this->checkExpiration($token);
+        if($controllo == 1){
+            $id = $_POST['id_multa'];
+            $miaQuery = "DELETE FROM multa WHERE id = $id;";
+            $statement = $this->db_connection->query($miaQuery);
+
+            sendResponse(200, '{"esito":"ok"}', "application/json");
+        }else{
+            sendResponse(500, '{"esito":"no"}', "application/json");
+        }
+    }
+    function decint($token){
+        $controllo = $this->checkExpiration($token);
+        if($controllo == 1){
+            $min = $_POST['min'];
+            $max = $_POST['max'];
+
+            if($min < 4){
+                $this->enter_delete($token, 0, 4);
+            }else{
+                $this->enter_delete($token, $min-4, $max-4);
+            }
+        }else{
+            sendResponse(500, '{"esito":"no"}', "application/json");
+        }
+    }
+    function incint($token){
+        $controllo = $this->checkExpiration($token);
+        if($controllo == 1){
+            $min = $_POST['min'];
+            $max = $_POST['max'];
+
+            $this->enter_delete($token, $min+4, $max+4);
+        }else{
+            sendResponse(500, '{"esito":"no"}', "application/json");
+        }
+    }
+    function prima($token){
+        $controllo = $this->checkExpiration($token);
+        if($controllo == 1){
+            $min = $_POST['min'];
+            $max = $_POST['max'];
+
+            if($min < 4){
+                $this->enter_query($token, 0, 4);
+            }else{
+                $this->enter_query($token, $min-4, $max-4);
+            }
+        }else{
+            sendResponse(500, '{"esito":"no"}', "application/json");
+        }
+    }
+    function dopo($token){
+        $controllo = $this->checkExpiration($token);
+        if($controllo == 1){
+            $min = $_POST['min'];
+            $max = $_POST['max'];
+
+            $this->enter_query($token, $min+4, $max+4);
+        }else{
+            sendResponse(500, '{"esito":"no"}', "application/json");
+        }
+    }
 }
 
 
@@ -432,11 +508,26 @@ switch($function)
     case "remore-user":
         $api->remove_user($token);
         break;
+    case "diminuisci-intervallo":
+        $api->decint($token);
+        break;
+    case "aumenta-intervallo":
+        $api->incint($token);
+        break;
     case "query":
         $api->enter_query($token);
         break;
+    case "prima":
+        $api->prima($token);
+        break;
+    case "dopo":
+        $api->dopo($token);
+        break;
     case "tok":
         $api->enter_token($token, $token);
+        break;
+    case "getback":
+        $api->enter_admin($token);
         break;
     case "app-authentication":
         $api->app_authentication();
@@ -452,6 +543,9 @@ switch($function)
         break;
     case "app-visualizzamulte":
         $api->app_visualizzaMulte($token);
+        break;
+    case "app-eliminamulta":
+        $api->app_eliminaMulta($token);
         break;
     default:
         sendResponse(500,"Richiesta errata! :(");
